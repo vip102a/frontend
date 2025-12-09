@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Lucky Box — Mini App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:Arial, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:#f3f6fb}
+    .card{width:340px; padding:22px; border-radius:14px; background:#fff; box-shadow:0 8px 24px rgba(0,0,0,0.08); text-align:center}
+    button{background:#ffb100;border:none;padding:12px 18px;border-radius:10px;font-weight:700;cursor:pointer}
+    #result{margin-top:12px;color:#0b8a2e}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🎁 Lucky Box</h2>
+    <p>Mua 1 Lucky Box để nhận phần thưởng digital (ảnh VIP hoặc mã)</p>
+    <p><b>Giá: <span id="price">50</span> ⭐️ Stars</b></p>
+    <button id="buyBtn">Mua bằng Stars</button>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const buyBtn = document.getElementById('buyBtn');
+    const result = document.getElementById('result');
+    const PRICE = 50; // số Stars
+
+    function inTelegram() {
+      return !!(window.Telegram && window.Telegram.WebApp);
+    }
+
+    async function createInvoice(payload) {
+      const r = await fetch('/api/create-invoice', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title: 'Lucky Box', description: 'Mở 1 Lucky Box', price_stars: PRICE, payload })
+      });
+      return r.json();
+    }
+
+    buyBtn.addEventListener('click', async () => {
+      buyBtn.disabled = true;
+      result.textContent = 'Tạo hoá đơn...';
+      try {
+        const payload = 'lucky-' + Date.now();
+        const j = await createInvoice(payload);
+        if(!j.ok) throw new Error(j.error || 'Không tạo invoice');
+        const invoiceLink = j.invoiceLink;
+
+        if(!inTelegram()){
+          // Mở link ra tab mới (dùng khi test ngoài telegram)
+          window.open(invoiceLink, '_blank');
+          result.textContent = 'Mở tab thanh toán. Kiểm tra kết quả trên server.';
+          buyBtn.disabled = false;
+          return;
+        }
+
+        result.textContent = 'Mở giao diện thanh toán Telegram...';
+        window.Telegram.WebApp.openInvoice(invoiceLink, (status) => {
+          // callback may vary; treat 'paid' as success
+          if(status === 'paid' || status === 'successful_payment' || status === 'ok'){
+            result.textContent = 'Đã thanh toán — đang xác thực...';
+            // Request server to deliver reward (server sẽ verify tx from webhook in production)
+            fetch('/api/deliver', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ payload })
+            }).then(r=>r.json()).then(res=>{
+              if(res.ok) result.innerHTML = 'Phần thưởng: <b>' + res.reward + '</b>';
+              else result.textContent = 'Lỗi khi cấp thưởng: ' + res.error;
+            }).catch(e=>{
+              result.textContent = 'Lỗi deliver: ' + e;
+            });
+          } else {
+            result.textContent = 'Thanh toán bị huỷ hoặc thất bại.';
+          }
+          buyBtn.disabled = false;
+        });
+
+      } catch (e) {
+        result.textContent = 'Lỗi: ' + e.message;
+        buyBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
