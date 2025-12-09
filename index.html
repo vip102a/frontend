@@ -30,10 +30,15 @@
     }
 
     async function createInvoice(payload) {
-      const r = await fetch('/api/create-invoice', {
+      const r = await fetch('https://backend-yemh.onrender.com/api/create-invoice', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ title: 'Lucky Box', description: 'Mở 1 Lucky Box', price_stars: PRICE, payload })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Lucky Box',
+          description: 'Mở 1 Lucky Box',
+          price_stars: PRICE,
+          payload
+        })
       });
       return r.json();
     }
@@ -41,14 +46,16 @@
     buyBtn.addEventListener('click', async () => {
       buyBtn.disabled = true;
       result.textContent = 'Tạo hoá đơn...';
+
       try {
         const payload = 'lucky-' + Date.now();
         const j = await createInvoice(payload);
+
         if(!j.ok) throw new Error(j.error || 'Không tạo invoice');
+
         const invoiceLink = j.invoiceLink;
 
-        if(!inTelegram()){
-          // Mở link ra tab mới (dùng khi test ngoài telegram)
+        if(!inTelegram()) {
           window.open(invoiceLink, '_blank');
           result.textContent = 'Mở tab thanh toán. Kiểm tra kết quả trên server.';
           buyBtn.disabled = false;
@@ -56,24 +63,31 @@
         }
 
         result.textContent = 'Mở giao diện thanh toán Telegram...';
+        
         window.Telegram.WebApp.openInvoice(invoiceLink, (status) => {
-          // callback may vary; treat 'paid' as success
           if(status === 'paid' || status === 'successful_payment' || status === 'ok'){
             result.textContent = 'Đã thanh toán — đang xác thực...';
-            // Request server to deliver reward (server sẽ verify tx from webhook in production)
-            fetch('/api/deliver', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
+
+            fetch('https://backend-yemh.onrender.com/api/deliver', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ payload })
-            }).then(r=>r.json()).then(res=>{
-              if(res.ok) result.innerHTML = 'Phần thưởng: <b>' + res.reward + '</b>';
-              else result.textContent = 'Lỗi khi cấp thưởng: ' + res.error;
-            }).catch(e=>{
+            })
+            .then(r => r.json())
+            .then(res => {
+              if(res.ok)
+                result.innerHTML = 'Phần thưởng: <b>' + res.reward + '</b>';
+              else
+                result.textContent = 'Lỗi khi cấp thưởng: ' + res.error;
+            })
+            .catch(e => {
               result.textContent = 'Lỗi deliver: ' + e;
             });
+
           } else {
             result.textContent = 'Thanh toán bị huỷ hoặc thất bại.';
           }
+
           buyBtn.disabled = false;
         });
 
@@ -85,4 +99,3 @@
   </script>
 </body>
 </html>
-
