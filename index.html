@@ -5,7 +5,7 @@
   <title>Lucky Box — Mini App</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-  <!-- MUST HAVE → Telegram API -->
+  <!-- MUST HAVE -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <style>
@@ -55,12 +55,14 @@
   </div>
 
 <script>
+  const tg = window.Telegram?.WebApp;
   const buyBtn = document.getElementById('buyBtn');
   const result = document.getElementById('result');
   const PRICE = 50;
 
+  // CHUẨN CHECK TELEGRAM
   function inTelegram() {
-    return window.Telegram && Telegram.WebApp && Telegram.WebApp.initData;
+    return !!(tg && tg.initDataUnsafe && tg.initData);
   }
 
   async function createInvoice(payload) {
@@ -85,41 +87,42 @@
       const payload = 'lucky-' + Date.now();
       const j = await createInvoice(payload);
 
-      if (!j.ok || !j.invoiceLink) throw new Error("Không tạo invoice");
+      if (!j.ok || !j.invoiceLink) throw new Error("Không tạo invoice!");
 
       const invoiceLink = j.invoiceLink;
 
+      // Nếu mở ngoài Telegram
       if (!inTelegram()) {
         window.location.href = invoiceLink;
-        result.textContent = '(Outside Telegram) Hãy mở trong ứng dụng Telegram!';
+        result.textContent = 'Bạn cần mở link này trong Telegram ✔';
         buyBtn.disabled = false;
         return;
       }
 
-      // BẮT BUỘC PHẢI CALL NHƯ NÀY
-      Telegram.WebApp.openInvoice(invoiceLink, async (status) => {
+      result.textContent = 'Mở giao diện thanh toán...';
 
-        console.log("Payment status:", status);
+      tg.openInvoice(invoiceLink, async (status) => {
+        console.log("RESULT PAYMENT:", status);
 
         if (status === 'paid' || status === 'successful_payment' || status === 'ok') {
           result.innerHTML = 'Thanh toán thành công ✔️<br/>Đang cấp thưởng...';
 
           const res = await fetch('https://backend-yemh.onrender.com/api/deliver', {
             method: 'POST',
-            headers: {'Content-Type':'application/json'},
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ payload })
           });
 
-          const data = await res.json();
+          const d = await res.json();
 
-          if (data.ok) {
-            result.innerHTML = '<b>🎉 Bạn nhận được: ' + data.reward + '</b>';
+          if (d.ok) {
+            result.innerHTML = '<b>🎉 Bạn nhận được: ' + d.reward + '</b>';
           } else {
-            result.innerHTML = 'Thanh toán OK nhưng lỗi khi cấp thưởng!';
+            result.innerHTML = 'Thanh toán được nhưng lỗi backend!';
           }
 
         } else {
-          result.innerHTML = '❌ Thanh toán bị huỷ hoặc thất bại';
+          result.innerHTML = '❌ Thanh toán thất bại hoặc bị huỷ!';
         }
 
         buyBtn.disabled = false;
@@ -131,9 +134,10 @@
     }
   });
 
-  // Tự mở khung mini app trên mobile
+  // PHẢI GỌI NGAY SAU LOAD
   if (inTelegram()) {
-    Telegram.WebApp.ready();
+    tg.expand();
+    tg.ready();
   }
 </script>
 
