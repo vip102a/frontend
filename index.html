@@ -59,14 +59,15 @@
   const buyBtn = document.getElementById('buyBtn');
   const result = document.getElementById('result');
   const PRICE = 50;
+  const backendOverride = new URLSearchParams(window.location.search).get('backend');
+  const BACKEND_URL = backendOverride || 'https://backend-yemh.onrender.com';
 
-  // CHUẨN CHECK TELEGRAM
   function inTelegram() {
-    return !!(tg && tg.initDataUnsafe && tg.initData);
+    return Boolean(tg && tg.initDataUnsafe && tg.initData);
   }
 
   async function createInvoice(payload) {
-    const r = await fetch('https://backend-yemh.onrender.com/api/create-invoice', {
+    const r = await fetch(`${BACKEND_URL}/api/create-invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -76,7 +77,28 @@
         payload
       })
     });
+
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`Backend lỗi (${r.status}): ${text || 'unknown'}`);
+    }
+
     return r.json();
+  }
+
+  async function deliverReward(payload) {
+    const res = await fetch(`${BACKEND_URL}/api/deliver`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ payload })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Backend lỗi (${res.status}): ${text || 'unknown'}`);
+    }
+
+    return res.json();
   }
 
   buyBtn.addEventListener('click', async () => {
@@ -87,14 +109,13 @@
       const payload = 'lucky-' + Date.now();
       const j = await createInvoice(payload);
 
-      if (!j.ok || !j.invoiceLink) throw new Error("Không tạo invoice!");
+      if (!j.ok || !j.invoiceLink) throw new Error(j.error || 'Không tạo được invoice');
 
       const invoiceLink = j.invoiceLink;
 
-      // Nếu mở ngoài Telegram
       if (!inTelegram()) {
-        window.location.href = invoiceLink;
         result.textContent = 'Bạn cần mở link này trong Telegram ✔';
+        window.location.href = invoiceLink;
         buyBtn.disabled = false;
         return;
       }
@@ -102,23 +123,21 @@
       result.textContent = 'Mở giao diện thanh toán...';
 
       tg.openInvoice(invoiceLink, async (status) => {
-        console.log("RESULT PAYMENT:", status);
+        console.log('RESULT PAYMENT:', status);
 
         if (status === 'paid' || status === 'successful_payment' || status === 'ok') {
           result.innerHTML = 'Thanh toán thành công ✔️<br/>Đang cấp thưởng...';
 
-          const res = await fetch('https://backend-yemh.onrender.com/api/deliver', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ payload })
-          });
+          try {
+            const d = await deliverReward(payload);
 
-          const d = await res.json();
-
-          if (d.ok) {
-            result.innerHTML = '<b>🎉 Bạn nhận được: ' + d.reward + '</b>';
-          } else {
-            result.innerHTML = 'Thanh toán được nhưng lỗi backend!';
+            if (d.ok) {
+              result.innerHTML = '<b>🎉 Bạn nhận được: ' + d.reward + '</b>';
+            } else {
+              result.innerHTML = 'Thanh toán được nhưng lỗi backend! ' + (d.error || '');
+            }
+          } catch (err) {
+            result.innerHTML = 'Thanh toán thành công nhưng backend lỗi: ' + err.message;
           }
 
         } else {
@@ -129,12 +148,12 @@
       });
 
     } catch (e) {
+      console.error(e);
       result.textContent = 'Lỗi: ' + e.message;
       buyBtn.disabled = false;
     }
   });
 
-  // PHẢI GỌI NGAY SAU LOAD
   if (inTelegram()) {
     tg.expand();
     tg.ready();
