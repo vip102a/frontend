@@ -5,7 +5,7 @@
   <title>Lucky Box — Mini App</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-  <!-- MUST HAVE -->
+  <!-- Telegram WebApp JS (bắt buộc) -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <style>
@@ -34,40 +34,51 @@
       font-weight:700;
       cursor:pointer
     }
+    button:disabled{
+      opacity:0.6;
+      cursor:not-allowed;
+    }
     #result{
       margin-top:12px;
-      color:#0b8a2e;
       min-height:24px;
       font-size:14px;
+      color:#0b8a2e;
+    }
+    #result.error{
+      color:#d11;
     }
   </style>
 </head>
 <body>
 
-  <div class="card">
-    <h2>🎁 Lucky Box</h2>
-    <p>Mua 1 Lucky Box để nhận phần thưởng digital (ảnh VIP hoặc mã)</p>
-    <p><b>Giá: <span id="price">50</span> ⭐️ Stars</b></p>
+<div class="card">
+  <h2>🎁 Lucky Box</h2>
+  <p>Mua 1 Lucky Box để nhận phần thưởng digital (ảnh VIP hoặc mã)</p>
+  <p><b>Giá: <span id="price">50</span> ⭐️ Stars</b></p>
 
-    <button id="buyBtn">Mua bằng Stars</button>
+  <button id="buyBtn">Mua bằng Stars</button>
 
-    <div id="result"></div>
-  </div>
+  <div id="result"></div>
+</div>
 
 <script>
-  const tg = window.Telegram?.WebApp;
+  const tg = window.Telegram && window.Telegram.WebApp;
   const buyBtn = document.getElementById('buyBtn');
   const result = document.getElementById('result');
   const PRICE = 50;
-  const backendOverride = new URLSearchParams(window.location.search).get('backend');
-  const BACKEND_URL = backendOverride || 'https://backend-yemh.onrender.com';
+  const BACKEND = 'https://backend-yemh.onrender.com'; // thay nếu backend bạn khác
+
+  function setResult(msg, isError = false) {
+    result.textContent = msg;
+    result.classList.toggle('error', !!isError);
+  }
 
   function inTelegram() {
-    return Boolean(tg && tg.initDataUnsafe && tg.initData);
+    return !!(tg && typeof tg.openInvoice === 'function');
   }
 
   async function createInvoice(payload) {
-    const r = await fetch(`${BACKEND_URL}/api/create-invoice`, {
+    const r = await fetch(BACKEND + '/api/create-invoice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -77,71 +88,70 @@
         payload
       })
     });
-
-    if (!r.ok) {
-      const text = await r.text();
-      throw new Error(`Backend lỗi (${r.status}): ${text || 'unknown'}`);
-    }
-
     return r.json();
-  }
-
-  async function deliverReward(payload) {
-    const res = await fetch(`${BACKEND_URL}/api/deliver`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ payload })
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Backend lỗi (${res.status}): ${text || 'unknown'}`);
-    }
-
-    return res.json();
   }
 
   buyBtn.addEventListener('click', async () => {
     buyBtn.disabled = true;
-    result.textContent = 'Đang tạo hoá đơn thanh toán...';
+    setResult('Đang tạo hoá đơn thanh toán...');
 
     try {
       const payload = 'lucky-' + Date.now();
       const j = await createInvoice(payload);
 
-      if (!j.ok || !j.invoiceLink) throw new Error(j.error || 'Không tạo được invoice');
+      console.log('create-invoice response =', j);
+
+      if (!j.ok || !j.invoiceLink) {
+        throw new Error(j.error || 'Không tạo được invoice từ Telegram');
+      }
 
       const invoiceLink = j.invoiceLink;
 
       if (!inTelegram()) {
-        result.textContent = 'Bạn cần mở link này trong Telegram ✔';
+        // Mở ngoài Telegram: chuyển sang link invoice luôn
         window.location.href = invoiceLink;
+        setResult('Hãy mở game này trong Telegram để thanh toán bằng Stars ✔', true);
         buyBtn.disabled = false;
         return;
       }
 
-      result.textContent = 'Mở giao diện thanh toán...';
+      setResult('Mở giao diện thanh toán...');
 
-      tg.openInvoice(invoiceLink, async (status) => {
-        console.log('RESULT PAYMENT:', status);
+      tg.openInvoice(invoiceLink, async (invoiceStatus) => {
+        console.log('openInvoice callback =', invoiceStatus);
 
-        if (status === 'paid' || status === 'successful_payment' || status === 'ok') {
-          result.innerHTML = 'Thanh toán thành công ✔️<br/>Đang cấp thưởng...';
+        const status =
+          typeof invoiceStatus === 'string'
+            ? invoiceStatus
+            : invoiceStatus && invoiceStatus.status;
+
+        if (status === 'paid') {
+          setResult('Thanh toán thành công ✔️ Đang cấp thưởng...');
 
           try {
-            const d = await deliverReward(payload);
+            const res = await fetch(BACKEND + '/api/deliver', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ payload })
+            });
+            const d = await res.json();
+            console.log('deliver response =', d);
 
             if (d.ok) {
-              result.innerHTML = '<b>🎉 Bạn nhận được: ' + d.reward + '</b>';
+              setResult('🎉 Bạn nhận được: ' + d.reward);
             } else {
-              result.innerHTML = 'Thanh toán được nhưng lỗi backend! ' + (d.error || '');
+              setResult('Thanh toán thành công nhưng backend lỗi cấp thưởng: ' + (d.error || ''), true);
             }
-          } catch (err) {
-            result.innerHTML = 'Thanh toán thành công nhưng backend lỗi: ' + err.message;
+          } catch (e) {
+            setResult('Thanh toán thành công nhưng gọi /deliver bị lỗi: ' + e.message, true);
           }
 
+        } else if (status === 'cancelled') {
+          setResult('❌ Bạn đã đóng cửa sổ thanh toán (status: cancelled)', true);
+        } else if (status === 'failed') {
+          setResult('❌ Telegram báo lỗi thanh toán (status: failed). Thường do: thiếu Stars, lỗi App Store/CH Play hoặc bot chưa xử lý pre_checkout.', true);
         } else {
-          result.innerHTML = '❌ Thanh toán thất bại hoặc bị huỷ!';
+          setResult('❌ Thanh toán không thành công. Trạng thái: ' + status, true);
         }
 
         buyBtn.disabled = false;
@@ -149,14 +159,18 @@
 
     } catch (e) {
       console.error(e);
-      result.textContent = 'Lỗi: ' + e.message;
+      setResult('Lỗi: ' + e.message, true);
       buyBtn.disabled = false;
     }
   });
 
   if (inTelegram()) {
-    tg.expand();
-    tg.ready();
+    try {
+      tg.expand();
+      tg.ready();
+    } catch (e) {
+      console.warn('tg.ready/expand error', e);
+    }
   }
 </script>
 
